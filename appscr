@@ -14,8 +14,10 @@ function doPost(e) {
     }
     
     throw new Error('Invalid action');
-    
+
   } catch (error) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    logError(ss, error.message);
     return ContentService.createTextOutput(`ERROR: ${error.message}`);
   }
 }
@@ -313,6 +315,33 @@ function getTotalNetRevenue(ss) {
   return total;
 }
 
+function getTotalExpenses(ss) {
+  const sheet = getOrCreateSheet(ss, 'Expense_Log', ['Date', 'User', 'Expense', 'Price', 'Receipt URL']);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return 0;
+  }
+  const values = sheet.getRange(2, 4, lastRow - 1, 1).getValues();
+  let total = 0;
+  values.forEach(row => {
+    const amount = parseFloat(row[0]);
+    if (!isNaN(amount)) {
+      total += amount;
+    }
+  });
+  return total;
+}
+
+function getBusinessSummary(ss) {
+  const totalRevenue = getTotalNetRevenue(ss);
+  const totalExpenses = getTotalExpenses(ss);
+  return {
+    totalNetRevenue: totalRevenue,
+    totalExpenses: totalExpenses,
+    netProfit: totalRevenue - totalExpenses
+  };
+}
+
 function sanitizeSheetName(name) {
   return name.replace(/[\\\/\?\*:\[\]]/g, '_').substring(0, 100).trim() || 'Unknown_Salesperson';
 }
@@ -332,6 +361,11 @@ function getOrCreateSheet(ss, sheetName, headers) {
     }
   }
   return sheet;
+}
+
+function logError(ss, message) {
+  const sheet = getOrCreateSheet(ss, 'Error_Log', ['Date', 'Message']);
+  sheet.appendRow([new Date(), message]);
 }
 
 // ----------------- New Summary Functions -----------------
@@ -557,12 +591,22 @@ function getDailyLeaderboard() {
   return leaderboard.join("\n");
 }
 
-// Exposes the leaderboard via a simple web endpoint.
-// When the URL is called with ?action=leaderboard, it returns the leaderboard text.
+// Exposes various endpoints such as leaderboard and business summary.
 function doGet(e) {
-  if (e.parameter.action === "leaderboard") {
-    const leaderboardText = getDailyLeaderboard();
-    return ContentService.createTextOutput(leaderboardText);
+  try {
+    if (e.parameter.action === "leaderboard") {
+      const leaderboardText = getDailyLeaderboard();
+      return ContentService.createTextOutput(leaderboardText);
+    } else if (e.parameter.action === "summary") {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const summary = getBusinessSummary(ss);
+      return ContentService.createTextOutput(JSON.stringify(summary))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    return ContentService.createTextOutput("Invalid request");
+  } catch (error) {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    logError(ss, error.message);
+    return ContentService.createTextOutput(`ERROR: ${error.message}`);
   }
-  return ContentService.createTextOutput("Invalid request");
 }
